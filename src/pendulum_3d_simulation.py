@@ -25,7 +25,7 @@ class Pendulum3D:
         self.m = 1.0        # Pendulum mass [kg]
         self.L = 1.5        # Pendulum length [m]
         self.g = 9.81       # Gravity [m/s^2]
-        self.b_theta = 3.0 # Damping for theta [N*m*s/rad] 
+        self.b_theta = 3.0  # Damping for theta [N*m*s/rad] 
         self.b_phi = 3.0    # Damping for phi [N*m*s/rad]
         # Control forces
         self.Fx = 0.0       # Force in x-direction [N]
@@ -36,14 +36,14 @@ class Pendulum3D:
         self.target_y = 0.0
         
         # Simple position controller gains
-        self.control_gain = 80.0      # Back to higher values for faster response
-        self.control_damping = 15.0   # Back to higher values
+        self.control_gain = 80.0      
+        self.control_damping = 15.0   
         
         # State variables: [x_c, x_c_dot, y_c, y_c_dot, theta, theta_dot, phi, phi_dot]
-        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi - 0.05, 0.0, 0.0, 0.0])  # Closer to upright
+        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi - 0.05, 0.0, 0.0, 0.0])  
         
         # Simulation parameters
-        self.dt = 0.018     # Back to original for normal speed
+        self.dt = 0.018     # Time step [s]
         self.time = 0.0     # Current time [s]
         
         self.real_start_time = time.time()
@@ -146,7 +146,7 @@ class Pendulum3D:
             phi_ddot = -self.b_phi * phi_dot / (mL2 * sin_theta**2 + epsilon)
         
         # Limit accelerations for numerical stability
-        max_accel = 20.0  # Reduced from 100 for stability
+        max_accel = 20.0  
         x_c_ddot = np.clip(x_c_ddot, -max_accel, max_accel)
         y_c_ddot = np.clip(y_c_ddot, -max_accel, max_accel)
         theta_ddot = np.clip(theta_ddot, -max_accel, max_accel)
@@ -175,7 +175,7 @@ class Pendulum3D:
                   self.control_damping * self.state[3])
         
         # Limit control forces
-        max_force = 100.0  # Back to higher forces for faster response
+        max_force = 100.0  # Maximum control force [N]
         self.Fx = np.clip(self.Fx, -max_force, max_force)
         self.Fy = np.clip(self.Fy, -max_force, max_force)
         
@@ -570,8 +570,6 @@ class PendulumSimulation:
         theta_deg = np.degrees(state[4])
         phi_deg = np.degrees(state[6])
         
-        
-        #status = f'''Time: {self.pendulum.time:.1f}s
         real_time = time.time() - self.pendulum.real_start_time
         status = f'''Sim: {self.pendulum.time:.1f}s | Real: {real_time:.1f}s
         Cart: ({state[0]:.2f}, {state[2]:.2f})
