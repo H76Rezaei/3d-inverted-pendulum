@@ -1,6 +1,6 @@
 """
-3D Inverted Pendulum on Cart 
-==========================================
+3D Inverted Pendulum on Cart - Lagrangian Implementation
+===============================================================
 
 Controls:
 - Arrow Keys: Move cart target position
@@ -17,8 +17,6 @@ import matplotlib.animation as animation
 import time
 
 class Pendulum3D:
-    """3D Inverted Pendulum on Cart System"""
-    
     def __init__(self):
         # System parameters
         self.M = 2.0        # Cart mass [kg]
@@ -27,6 +25,7 @@ class Pendulum3D:
         self.g = 9.81       # Gravity [m/s^2]
         self.b_theta = 3.0  # Damping for theta [N*m*s/rad] 
         self.b_phi = 3.0    # Damping for phi [N*m*s/rad]
+        
         # Control forces
         self.Fx = 0.0       # Force in x-direction [N]
         self.Fy = 0.0       # Force in y-direction [N]
@@ -40,13 +39,13 @@ class Pendulum3D:
         self.control_damping = 15.0   
         
         # State variables: [x_c, x_c_dot, y_c, y_c_dot, theta, theta_dot, phi, phi_dot]
-        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi - 0.05, 0.0, 0.0, 0.0])  
+        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi-0.05, 0.0, 0.1, 0.0]) 
         
         # Simulation parameters
         self.dt = 0.018     # Time step [s]
         self.time = 0.0     # Current time [s]
-        
         self.real_start_time = time.time()
+        
         # Animation control
         self.paused = False
         
@@ -59,152 +58,137 @@ class Pendulum3D:
         self.fx_history = []
         self.fy_history = []
         self.energy_history = []
-        
+
     def equations_of_motion(self, state, Fx, Fy):
-        """
-        3D Inverted Pendulum Equations of Motion
-        """
         x_c, x_c_dot, y_c, y_c_dot, theta, theta_dot, phi, phi_dot = state
-        
-        # Handle singularities properly
-        epsilon = 1e-6
+
+        # Trigonometric terms
         sin_theta = np.sin(theta)
         cos_theta = np.cos(theta)
         sin_phi = np.sin(phi)
         cos_phi = np.cos(phi)
         
-        # Protect against singularities
-        if abs(sin_theta) < epsilon:
-            sin_theta = np.sign(sin_theta) * epsilon if sin_theta != 0 else epsilon
-        
-        # Mass matrix components
-        M_total = self.M + self.m
+        # Prevent singularities
+        if abs(sin_theta) < 1e-6:
+            sin_theta = np.sign(sin_theta) * 1e-6 if sin_theta != 0 else 1e-6
+    
+        # Common terms
         mL = self.m * self.L
         mL2 = self.m * self.L**2
-        
-        # Build the 4x4 mass matrix for [x_c_ddot, y_c_ddot, theta_ddot, phi_ddot]
+        M_total = self.M + self.m
+    
         M = np.zeros((4, 4))
         
-        # Cart dynamics
-        M[0, 0] = M_total
-        M[0, 2] = mL * cos_theta * cos_phi
-        M[0, 3] = -mL * sin_theta * sin_phi
+        # Cart x-equation coefficients
+        M[0, 0] = M_total                           # d²T/dx_c_dot²
+        M[0, 1] = 0                                 # d²T/dx_c_dot dy_c_dot  
+        M[0, 2] = mL * cos_theta * cos_phi          # d²T/dx_c_dot dtheta_dot
+        M[0, 3] = -mL * sin_theta * sin_phi         # d²T/dx_c_dot dphi_dot
         
-        M[1, 1] = M_total
-        M[1, 2] = mL * cos_theta * sin_phi
-        M[1, 3] = mL * sin_theta * cos_phi
+        # Cart y-equation coefficients  
+        M[1, 0] = 0                                 # d²T/dy_c_dot dx_c_dot
+        M[1, 1] = M_total                           # d²T/dy_c_dot²
+        M[1, 2] = mL * cos_theta * sin_phi          # d²T/dy_c_dot dtheta_dot
+        M[1, 3] = mL * sin_theta * cos_phi          # d²T/dy_c_dot dphi_dot
         
-        # Pendulum dynamics
-        M[2, 0] = mL * cos_theta * cos_phi
-        M[2, 1] = mL * cos_theta * sin_phi
-        M[2, 2] = mL2
-        M[2, 3] = 0
+        # Theta equation coefficients
+        M[2, 0] = mL * cos_theta * cos_phi          # d²T/dtheta_dot dx_c_dot
+        M[2, 1] = mL * cos_theta * sin_phi          # d²T/dtheta_dot dy_c_dot
+        M[2, 2] = mL2                               # d²T/dtheta_dot²
+        M[2, 3] = 0                                 # d²T/dtheta_dot dphi_dot
         
-        M[3, 0] = -mL * sin_theta * sin_phi
-        M[3, 1] = mL * sin_theta * cos_phi
-        M[3, 2] = 0
-        M[3, 3] = mL2 * sin_theta**2
+        # Phi equation coefficients
+        M[3, 0] = -mL * sin_theta * sin_phi         # d²T/dphi_dot dx_c_dot
+        M[3, 1] = mL * sin_theta * cos_phi          # d²T/dphi_dot dy_c_dot
+        M[3, 2] = 0                                 # d²T/dphi_dot dtheta_dot
+        M[3, 3] = mL2 * sin_theta**2                # d²T/dphi_dot²
+    
+        # RIGHT-HAND SIDE from Lagrangian
         
-        # Right-hand side vector
         RHS = np.zeros(4)
         
-        # Cart X forces
+        # Cart x-equation RHS: Fx - Coriolis/Centrifugal terms
+        # From: Fx - ∂/∂x_c[T - V] + Coriolis terms
         RHS[0] = (Fx - mL * (
-            theta_dot**2 * sin_theta * cos_phi +
-            phi_dot**2 * sin_theta * cos_phi +
-            2 * theta_dot * phi_dot * cos_theta * sin_phi
+            -theta_dot**2 * sin_theta * cos_phi +     # Centrifugal from theta
+            -phi_dot**2 * sin_theta * cos_phi +       # Centrifugal from phi  
+            -2 * theta_dot * phi_dot * cos_theta * sin_phi  # Coriolis theta-phi
         ))
         
-        # Cart Y forces  
+        # Cart y-equation RHS:
         RHS[1] = (Fy - mL * (
-            theta_dot**2 * sin_theta * sin_phi +
-            phi_dot**2 * sin_theta * sin_phi -
-            2 * theta_dot * phi_dot * cos_theta * cos_phi
+            -theta_dot**2 * sin_theta * sin_phi +   
+            -phi_dot**2 * sin_theta * sin_phi +     
+            2 * theta_dot * phi_dot * cos_theta * cos_phi   
         ))
         
-        # Pendulum theta torques
-        RHS[2] = (-self.m * self.g * self.L * sin_theta - 
-          self.b_theta * theta_dot +
-          mL2 * phi_dot**2 * sin_theta * cos_theta +
-          0.01 * (theta - np.pi))  
+        # Theta equation RHS
+        # From: -∂/∂theta[T - V] where V = -mgL*cos(theta)
+        RHS[2] = (
+            -self.m * self.g * self.L * sin_theta +   # Gravity: -∂V/∂theta
+            -self.b_theta * theta_dot +               # Damping
+            mL2 * phi_dot**2 * sin_theta * cos_theta  
+        )
         
-        # Pendulum phi torques
-        RHS[3] = (-self.b_phi * phi_dot -
-                  2 * mL2 * sin_theta * cos_theta * theta_dot * phi_dot)
-        
-        # Solve the linear system M * accelerations = RHS
+        # Phi equation RHS
+        # From: -∂/∂phi[T - V] (no potential energy depends on phi)
+        RHS[3] = (
+            -self.b_phi * phi_dot +                   # Damping
+            -2 * mL2 * sin_theta * cos_theta * theta_dot * phi_dot  
+        )
+
+        # Solve the complete Lagrangian system M * q_ddot = RHS
         try:
-            # Better regularization for stability
-            M_reg = M + np.eye(4) * 1e-6
+            # Add minimal regularization only for numerical stability
+            M_reg = M + np.eye(4) * 1e-12
             accelerations = np.linalg.solve(M_reg, RHS)
-            x_c_ddot, y_c_ddot, theta_ddot, phi_ddot = accelerations
         except np.linalg.LinAlgError:
-            # Fallback if matrix is singular
-            x_c_ddot = Fx / M_total
-            y_c_ddot = Fy / M_total
-            theta_ddot = -self.g * sin_theta / self.L - self.b_theta * theta_dot / mL2
-            phi_ddot = -self.b_phi * phi_dot / (mL2 * sin_theta**2 + epsilon)
-        
-        # Limit accelerations for numerical stability
-        max_accel = 20.0  
-        x_c_ddot = np.clip(x_c_ddot, -max_accel, max_accel)
-        y_c_ddot = np.clip(y_c_ddot, -max_accel, max_accel)
-        theta_ddot = np.clip(theta_ddot, -max_accel, max_accel)
-        phi_ddot = np.clip(phi_ddot, -max_accel, max_accel)
-        
-        # Return state derivatives
+            # Fallback with least squares if singular
+            accelerations = np.linalg.lstsq(M, RHS, rcond=1e-6)[0]
+    
+        # Limit accelerations only for numerical safety (not physics)
+        x_c_ddot, y_c_ddot, theta_ddot, phi_ddot = np.clip(accelerations, -50, 50)
+    
+        # Return complete state derivatives
         return np.array([x_c_dot, x_c_ddot, y_c_dot, y_c_ddot, 
                         theta_dot, theta_ddot, phi_dot, phi_ddot])
-    
+
     def integrate_step(self):
-        """Integrate one time step using RK4"""
+        """Integration with control"""
         if self.paused:
             return
-        # Check if real time has passed
-        real_elapsed = time.time() - self.real_start_time
-        if self.time >= real_elapsed:
-            return
-            
-        # Position controller
+        
         error_x = self.target_x - self.state[0]
         error_y = self.target_y - self.state[2]
-        
-        self.Fx = (self.control_gain * error_x - 
-                  self.control_damping * self.state[1])
-        self.Fy = (self.control_gain * error_y - 
-                  self.control_damping * self.state[3])
-        
-        # Limit control forces
-        max_force = 100.0  # Maximum control force [N]
-        self.Fx = np.clip(self.Fx, -max_force, max_force)
-        self.Fy = np.clip(self.Fy, -max_force, max_force)
-        
-        # RK4 integration
+    
+        # PD controller with saturation
+        self.Fx = np.clip(
+            50.0 * error_x - 20.0 * self.state[1], 
+            -100, 100
+        )
+        self.Fy = np.clip(
+            50.0 * error_y - 20.0 * self.state[3],
+            -100, 100
+        )
+
+        # Adaptive time step for stability
+        max_theta = np.abs(self.state[4] - np.pi)
+        adaptive_dt = self.dt * (0.5 if max_theta > 0.5 else 1.0)
+    
+        # RK4 integration using Lagrangian equations
         k1 = self.equations_of_motion(self.state, self.Fx, self.Fy)
-        k2 = self.equations_of_motion(self.state + 0.5*self.dt*k1, self.Fx, self.Fy)
-        k3 = self.equations_of_motion(self.state + 0.5*self.dt*k2, self.Fx, self.Fy)
-        k4 = self.equations_of_motion(self.state + self.dt*k3, self.Fx, self.Fy)
-        
-        # Update state
-        self.state += self.dt * (k1 + 2*k2 + 2*k3 + k4) / 6
-        
-        # FIXED: Wrap theta to [-π, π] range for proper display
-        self.state[4] = np.arctan2(np.sin(self.state[4]), np.cos(self.state[4]))
-        
-        # Wrap phi angle to [-pi, pi]
-        self.state[6] = np.arctan2(np.sin(self.state[6]), np.cos(self.state[6]))
-        
-        # Limit cart position to prevent it from going off-screen
-        self.state[0] = np.clip(self.state[0], -4.0, 4.0)
-        self.state[2] = np.clip(self.state[2], -4.0, 4.0)
-        
-        # Limit velocities to prevent numerical explosion
-        max_vel = 5.0
-        self.state[1] = np.clip(self.state[1], -max_vel, max_vel)  # x_dot
-        self.state[3] = np.clip(self.state[3], -max_vel, max_vel)  # y_dot
-        self.state[5] = np.clip(self.state[5], -max_vel, max_vel)  # theta_dot
-        self.state[7] = np.clip(self.state[7], -max_vel, max_vel)  # phi_dot
-        
+        k2 = self.equations_of_motion(self.state + 0.5*adaptive_dt*k1, self.Fx, self.Fy)
+        k3 = self.equations_of_motion(self.state + 0.5*adaptive_dt*k2, self.Fx, self.Fy)
+        k4 = self.equations_of_motion(self.state + adaptive_dt*k3, self.Fx, self.Fy)
+    
+        self.state += adaptive_dt * (k1 + 2*k2 + 2*k3 + k4) / 6
+    
+        # Angle wrapping 
+        self.state[4] = np.arctan2(np.sin(self.state[4]), np.cos(self.state[4]))  # θ
+        self.state[6] = np.arctan2(np.sin(self.state[6]), np.cos(self.state[6]))  # φ
+        # velocity limits for numerical safety
+        self.state[1:8:2] = np.clip(self.state[1:8:2], -5, 5)  # All velocities
+    
         # Safety check for numerical stability
         if not np.isfinite(self.state).all():
             print("Numerical instability detected, resetting...")
@@ -213,8 +197,6 @@ class Pendulum3D:
         
         self.time += self.dt
         
-        
-        # Log data for plotting
         self.time_history.append(self.time)
         self.cart_x_history.append(self.state[0])
         self.cart_y_history.append(self.state[2])
@@ -223,10 +205,30 @@ class Pendulum3D:
         self.fx_history.append(self.Fx)
         self.fy_history.append(self.Fy)
         
-        # Calculate total energy
-        kinetic_energy = 0.5 * (self.M + self.m) * (self.state[1]**2 + self.state[3]**2)
-        kinetic_energy += 0.5 * self.m * self.L**2 * (self.state[5]**2 + self.state[7]**2 * np.sin(self.state[4])**2)
-        potential_energy = -self.m * self.g * self.L * np.cos(self.state[4])
+
+        x_c, x_c_dot, y_c, y_c_dot, theta, theta_dot, phi, phi_dot = self.state
+        
+        # Pendulum mass velocity components in 3D space
+        vx_p = x_c_dot + self.L * (
+            theta_dot * np.cos(theta) * np.cos(phi) 
+            - phi_dot * np.sin(theta) * np.sin(phi)
+        )
+        vy_p = y_c_dot + self.L * (
+            theta_dot * np.cos(theta) * np.sin(phi) 
+            + phi_dot * np.sin(theta) * np.cos(phi)
+        )
+        vz_p = self.L * theta_dot * np.sin(theta)
+
+        # Total kinetic energy
+        kinetic_energy = (
+            0.5 * self.M * (x_c_dot**2 + y_c_dot**2) 
+            + 0.5 * self.m * (vx_p**2 + vy_p**2 + vz_p**2)
+        )
+
+        # Potential energy
+        potential_energy = self.m * self.g * (-self.L * np.cos(theta))
+
+        # Total mechanical energy
         total_energy = kinetic_energy + potential_energy
         self.energy_history.append(total_energy)
         
@@ -260,7 +262,7 @@ class Pendulum3D:
     
     def reset(self):
         """Reset simulation to initial state"""
-        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi - 0.05, 0.0, 0.0, 0.0])  # Start closer to upright
+        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi - 0.05, 0.0, 0.1, 0.0])
         self.time = 0.0
         self.real_start_time = time.time()
         self.target_x = 0.0
@@ -286,7 +288,7 @@ class Pendulum3D:
         
         # Create figure with subplots
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-        fig.suptitle('3D Inverted Pendulum Simulation Results', fontsize=16)
+        fig.suptitle('3D Inverted Pendulum - Lagrangian Implementation', fontsize=16)
         
         # Plot 1: Cart Position
         axes[0, 0].plot(self.time_history, self.cart_x_history, 'b-', label='X position')
@@ -358,8 +360,9 @@ class Pendulum3D:
         
         plt.tight_layout()
         plt.show()
-        print("Report plots generated!")
+        print("Simulation plots generated!")
 
+# Keep your exact same visualization class
 class PendulumSimulation:
     """3D Pendulum Visualization and Simulation"""
     
@@ -367,43 +370,35 @@ class PendulumSimulation:
         self.pendulum = Pendulum3D()
         
         # Create figure and subplots
-        self.fig = plt.figure(figsize=(15, 10))
-        self.fig.suptitle('3D Inverted Pendulum on Cart', fontsize=16)
+        self.fig = plt.figure(figsize=(14, 8))
+        self.fig.suptitle('3D Inverted Pendulum - Lagrangian Implementation', fontsize=14)
         
         # 3D plot
         self.ax = self.fig.add_subplot(221, projection='3d')
-        self.ax.set_title('3D View')
-        
+        self.ax.set_title('3D View', fontsize=10)
+
         # Top view (X-Y plane)
         self.ax_top = self.fig.add_subplot(222)
-        self.ax_top.set_title('Top View (X-Y Plane)')
+        self.ax_top.set_title('Top View (X-Y Plane)', fontsize=10)
         self.ax_top.set_aspect('equal')
         
         # Side view (X-Z plane)
         self.ax_side1 = self.fig.add_subplot(223)
-        self.ax_side1.set_title('Side View (X-Z Plane)')
+        self.ax_side1.set_title('Side View (X-Z Plane)', fontsize=10)
         self.ax_side1.set_aspect('equal')
         
         # Side view (Y-Z plane)
         self.ax_side2 = self.fig.add_subplot(224)
-        self.ax_side2.set_title('Side View (Y-Z Plane)')
+        self.ax_side2.set_title('Side View (Y-Z Plane)', fontsize=10)
         self.ax_side2.set_aspect('equal')
         
         # Initialize plot elements
         self.setup_3d_plot()
         self.setup_2d_plots()
         self.setup_controls()
-        
-        # Print instructions
-        print("=== 3D PENDULUM SIMULATION ===")
-        print("Controls:")
-        print("  Arrow Keys: Move cart target position")
-        print("  R: Reset simulation")
-        print("  Space: Pause/Resume")
-        print("  P: Generate plots")
-        print("  C: Center cart")
 
-        # Animation with normal speed
+
+        # Animation
         self.animation = animation.FuncAnimation(
             self.fig, self.animate, interval=20, blit=False, cache_frame_data=False
         )
@@ -477,9 +472,12 @@ class PendulumSimulation:
         
     def setup_controls(self):
         """Setup interactive controls"""
-        self.fig.text(0.02, 0.95, 'Controls:', fontsize=12, weight='bold')
-        self.fig.text(0.02, 0.92, '• Arrow Keys: Move cart target', fontsize=9)
-        self.fig.text(0.02, 0.89, '• R: Reset  Space: Pause  P: Plots  C: Center', fontsize=9)
+        self.fig.text(0.02, 0.95, 'Lagrangian Implementation:', fontsize=12, weight='bold', color='blue')
+        self.fig.text(0.02, 0.84, 'Controls:', fontsize=10, weight='bold', va='top')
+        self.fig.text(0.02, 0.79,
+              '• Arrow Keys: Move cart\n• R: Reset\n• Space: Pause',
+              fontsize=9, va='top')
+
 
         # Status text
         self.status_text = self.fig.text(0.02, 0.60, '', fontsize=9, family='monospace')
@@ -490,16 +488,12 @@ class PendulumSimulation:
         
         if event.key == 'up':
             self.pendulum.target_y += step
-            print(f"Target Y: {self.pendulum.target_y:.2f}m")
         elif event.key == 'down':
             self.pendulum.target_y -= step
-            print(f"Target Y: {self.pendulum.target_y:.2f}m")
         elif event.key == 'left':
             self.pendulum.target_x -= step
-            print(f"Target X: {self.pendulum.target_x:.2f}m")
         elif event.key == 'right':
             self.pendulum.target_x += step
-            print(f"Target X: {self.pendulum.target_x:.2f}m")
         elif event.key == 'r':
             self.pendulum.reset()
             self.trajectory_x.clear()
@@ -571,12 +565,12 @@ class PendulumSimulation:
         phi_deg = np.degrees(state[6])
         
         real_time = time.time() - self.pendulum.real_start_time
-        status = f'''Sim: {self.pendulum.time:.1f}s | Real: {real_time:.1f}s
-        Cart: ({state[0]:.2f}, {state[2]:.2f})
-        Target: ({self.pendulum.target_x:.2f}, {self.pendulum.target_y:.2f})
-        θ: {theta_deg:.1f}°  φ: {phi_deg:.1f}°
-        Forces: Fx={self.pendulum.Fx:.1f}N  Fy={self.pendulum.Fy:.1f}N
-        Damping: θ={self.pendulum.b_theta:.2f}, φ={self.pendulum.b_phi:.2f}'''
+        status = f'''LAGRANGIAN IMPLEMENTATION
+Sim: {self.pendulum.time:.1f}s | Real: {real_time:.1f}s
+Cart: ({state[0]:.2f}, {state[2]:.2f})
+θ: {theta_deg:.1f}°  φ: {phi_deg:.1f}°
+Forces: Fx={self.pendulum.Fx:.1f}N  Fy={self.pendulum.Fy:.1f}N
+'''
         
         self.status_text.set_text(status)
         
@@ -586,8 +580,7 @@ class PendulumSimulation:
                 self.cart_side2, self.mass_side2, self.rod_side2)
 
 def main():
-    print("3D Inverted Pendulum Simulation")
-    
+
     # Create and run simulation
     sim = PendulumSimulation()
     plt.show()
