@@ -39,7 +39,7 @@ class Pendulum3D:
         self.control_damping = 15.0   
         
         # State variables: [x_c, x_c_dot, y_c, y_c_dot, theta, theta_dot, phi, phi_dot]
-        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi-0.05, 0.0, 0.1, 0.0]) 
+        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi-0.05, 0.0, 0.0, 0.0]) 
         
         # Simulation parameters
         self.dt = 0.018     # Time step [s]
@@ -109,12 +109,12 @@ class Pendulum3D:
         
         # Cart x-equation RHS: Fx - Coriolis/Centrifugal terms
         # From: Fx - ∂/∂x_c[T - V] + Coriolis terms
-        RHS[0] = (Fx - mL * (
-            -theta_dot**2 * sin_theta * cos_phi +     # Centrifugal from theta
-            -phi_dot**2 * sin_theta * cos_phi +       # Centrifugal from phi  
-            -2 * theta_dot * phi_dot * cos_theta * sin_phi  # Coriolis theta-phi
+        RHS[0] = (Fx + mL * (
+            theta_dot**2 * sin_theta * cos_phi +     
+            phi_dot**2 * sin_theta * cos_phi +       
+            2 * theta_dot * phi_dot * cos_theta * sin_phi
         ))
-        
+
         # Cart y-equation RHS:
         RHS[1] = (Fy - mL * (
             -theta_dot**2 * sin_theta * sin_phi +   
@@ -134,7 +134,9 @@ class Pendulum3D:
         # From: -∂/∂phi[T - V] (no potential energy depends on phi)
         RHS[3] = (
             -self.b_phi * phi_dot +                   # Damping
-            -2 * mL2 * sin_theta * cos_theta * theta_dot * phi_dot  
+            -2 * mL2 * sin_theta * cos_theta * theta_dot * phi_dot +
+            mL * sin_theta * cos_phi * (Fx / M_total) +     # ✅ Use external force/mass
+            mL * sin_theta * sin_phi * (Fy / M_total)
         )
 
         # Solve the complete Lagrangian system M * q_ddot = RHS
@@ -262,7 +264,7 @@ class Pendulum3D:
     
     def reset(self):
         """Reset simulation to initial state"""
-        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi - 0.05, 0.0, 0.1, 0.0])
+        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi - 0.05, 0.0, 0.0, 0.0])
         self.time = 0.0
         self.real_start_time = time.time()
         self.target_x = 0.0
