@@ -19,7 +19,7 @@ class Pendulum3DSimulation:
         self.b_phi = 0.5
         
         # State: [x_c, x_c_dot, y_c, y_c_dot, theta, theta_dot, phi, phi_dot]
-        self.state = np.array([0.0, 0.0, 0.0, 0.0, np.pi-0.1, 0.0, 0.8, 0.0])  # Start at 60 degrees
+        self.state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0])  # Start at 60 degrees
         
         # Simulation parameters
         self.dt = 0.02
@@ -33,7 +33,10 @@ class Pendulum3DSimulation:
         # iLQR controller with enhanced viscous damping
         self.ilqr = iLQR3DPendulum(T=50, dt=self.dt, M=self.M, m=self.m, L=self.L, g=self.g,
                                   b_theta=self.b_theta, b_phi=self.b_phi,
-                                  b_cart=0.01, b_cubic=0.001)
+                                  b_cart=0.01)
+        
+        # Print controller summary
+        self.ilqr.print_summary()
         
         # Control update frequency 
         self.control_update_freq = 3
@@ -48,7 +51,7 @@ class Pendulum3DSimulation:
     
     def dynamics(self, state, u):
         """System dynamics for simulation"""
-        f, _, _ = self.ilqr.dynamics(state, u)
+        f = self.ilqr.dynamics(state, u)
         return f
     
     def update_control(self):
@@ -57,7 +60,7 @@ class Pendulum3DSimulation:
             start_time = time.time()
             
             # Solve iLQR
-            success = self.ilqr.solve(self.state, verbose=False)
+            success = self.ilqr.solve(self.state)
             
             solve_time = time.time() - start_time
             self.solve_times.append(solve_time)
